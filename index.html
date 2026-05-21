@@ -421,44 +421,57 @@ tr:hover td { background: #fafbfc; }
   <!-- SECTION 3 -->
   <h2 id="review-primitive">The Review primitive</h2>
 
-  <p>The <code>ReviewPrimitive</code> implements iterative refinement through critique. Given a task, a Solver agent produces an initial response. A Critic agent evaluates it and produces feedback — not by decoding text from the Solver, but by reading the Solver's <strong>KV cache directly</strong>. The Solver then refines conditioned on both its own KV cache and the Critic's KV cache, also without any text round-trip.</p>
+  <p>The <code>ReviewPrimitive</code> contains <strong>two agents: a Solver and a Critic</strong>. The Solver is called twice — once to generate an initial response, once to refine it — with the Critic in between. All communication between them happens through KV cache concatenation; no text is decoded between stages.</p>
+
+  <ol>
+    <li><strong>Solver generates</strong> (<code>_solver_initial_kv</code>): The Solver runs on the user query and produces a response. Rather than decoding the text, its accumulated KV cache (<code>solver_cache</code>) is passed to the Critic.</li>
+    <li><strong>Critic reads and responds</strong> (<code>_critic_kv</code>): The Critic's KV cache is <strong>concatenated onto <code>solver_cache</code></strong> along the sequence dimension, so the Critic attends over the Solver's full generation without any text round-trip. It generates its feedback and returns <code>critic_cache</code>.</li>
+    <li><strong>Solver refines</strong> (<code>_solver_refine_text</code>): The Solver's refine prompt KV cache is concatenated with both <code>solver_cache</code> and <code>critic_cache</code>. The Solver generates the final refined output from this combined context — this is the only stage that decodes text.</li>
+  </ol>
 
   <figure class="arch-fig">
-    <svg viewBox="0 0 680 210" role="img" aria-label="ReviewPrimitive architecture">
+    <svg viewBox="0 0 680 240" role="img" aria-label="ReviewPrimitive two-agent architecture">
       <defs>
         <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </marker>
       </defs>
-      <!-- External interface -->
-      <line x1="30" y1="105" x2="100" y2="105" stroke="#888" stroke-width="1.5" marker-end="url(#arr)"/>
-      <text x="18" y="100" font-size="12" fill="#888" font-family="monospace">task</text>
-      <line x1="580" y1="105" x2="650" y2="105" stroke="#888" stroke-width="1.5" marker-end="url(#arr)"/>
-      <text x="655" y="100" font-size="12" fill="#888" font-family="monospace">output</text>
+
       <!-- Outer primitive box -->
-      <rect x="100" y="50" width="480" height="120" rx="10" fill="none" stroke="#ee4c2c" stroke-width="1.5" stroke-dasharray="6 3"/>
-      <text x="118" y="68" font-size="11" fill="#ee4c2c" font-weight="600" font-family="system-ui">ReviewPrimitive</text>
+      <rect x="80" y="30" width="520" height="155" rx="10" fill="none" stroke="#ee4c2c" stroke-width="1.5" stroke-dasharray="6 3"/>
+      <text x="98" y="48" font-size="11" fill="#ee4c2c" font-weight="600" font-family="system-ui">ReviewPrimitive</text>
+
+      <!-- task in -->
+      <line x1="20" y1="107" x2="80" y2="107" stroke="#888" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="50" y="98" text-anchor="middle" font-size="11" fill="#888" font-family="system-ui">task</text>
+
       <!-- Solver box -->
-      <rect x="130" y="80" width="130" height="50" rx="6" fill="#f0f7ff" stroke="#3b82f6" stroke-width="1"/>
-      <text x="195" y="101" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a5f" font-family="system-ui">Solver</text>
-      <text x="195" y="118" text-anchor="middle" font-size="11" fill="#3b82f6" font-family="system-ui">_solver_initial_kv()</text>
+      <rect x="110" y="65" width="165" height="75" rx="6" fill="#f0f7ff" stroke="#3b82f6" stroke-width="1"/>
+      <text x="192" y="97" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a5f" font-family="system-ui">Solver</text>
+      <text x="192" y="113" text-anchor="middle" font-size="11" fill="#3b82f6" font-family="system-ui">_solver_initial_kv()</text>
+      <text x="192" y="129" text-anchor="middle" font-size="10" fill="#3b82f6" font-family="system-ui">_solver_refine_text()</text>
+
       <!-- Critic box -->
-      <rect x="330" y="80" width="130" height="50" rx="6" fill="#fef3f2" stroke="#ef4444" stroke-width="1"/>
-      <text x="395" y="101" text-anchor="middle" font-size="13" font-weight="600" fill="#7f1d1d" font-family="system-ui">Critic</text>
-      <text x="395" y="118" text-anchor="middle" font-size="11" fill="#ef4444" font-family="system-ui">_critic_kv()</text>
-      <!-- Refine box -->
-      <rect x="476" y="80" width="86" height="50" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="1"/>
-      <text x="519" y="101" text-anchor="middle" font-size="13" font-weight="600" fill="#14532d" font-family="system-ui">Solver</text>
-      <text x="519" y="118" text-anchor="middle" font-size="11" fill="#22c55e" font-family="system-ui">_refine()</text>
-      <!-- Arrows between boxes -->
-      <line x1="260" y1="105" x2="330" y2="105" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
-      <text x="295" y="98" text-anchor="middle" font-size="10" fill="#3b82f6" font-family="system-ui">solver KV</text>
-      <line x1="460" y1="105" x2="476" y2="105" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr)"/>
-      <text x="468" y="98" text-anchor="middle" font-size="10" fill="#ef4444" font-family="system-ui">critic KV</text>
-      <!-- KV note -->
-      <text x="340" y="185" text-anchor="middle" font-size="11" fill="#888" font-family="system-ui">All internal communication is via KV cache — no text decoding between stages</text>
+      <rect x="405" y="65" width="165" height="75" rx="6" fill="#fef3f2" stroke="#ef4444" stroke-width="1"/>
+      <text x="487" y="97" text-anchor="middle" font-size="13" font-weight="600" fill="#7f1d1d" font-family="system-ui">Critic</text>
+      <text x="487" y="113" text-anchor="middle" font-size="11" fill="#ef4444" font-family="system-ui">_critic_kv()</text>
+
+      <!-- Solver → Critic: solver_cache -->
+      <line x1="275" y1="90" x2="405" y2="90" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="340" y="83" text-anchor="middle" font-size="10" fill="#3b82f6" font-family="system-ui">solver_cache (KV concat)</text>
+
+      <!-- Critic → Solver: critic_cache -->
+      <line x1="405" y1="120" x2="275" y2="120" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="340" y="137" text-anchor="middle" font-size="10" fill="#ef4444" font-family="system-ui">critic_cache (KV concat)</text>
+
+      <!-- output -->
+      <line x1="600" y1="107" x2="660" y2="107" stroke="#888" stroke-width="1.5" marker-end="url(#arr)"/>
+      <text x="648" y="98" text-anchor="middle" font-size="11" fill="#888" font-family="system-ui">text</text>
+
+      <!-- note -->
+      <text x="340" y="210" text-anchor="middle" font-size="11" fill="#888" font-family="system-ui">Solver is called twice: once to generate, once to refine. Critic is called once between them.</text>
     </svg>
-    <figcaption>Fig 1. ReviewPrimitive architecture. The Solver, Critic, and Refiner communicate through KV cache, not text.</figcaption>
+    <figcaption>Fig 1. ReviewPrimitive contains two agents — Solver and Critic. The Solver generates first, the Critic reads its KV cache and produces feedback, then the Solver refines conditioned on both KV caches.</figcaption>
   </figure>
 
   <p>This KV-cache-based communication has two practical benefits over text-based MAS:</p>
@@ -717,7 +730,7 @@ result <span class="op">=</span> primitive.<span class="fn">run</span>(<span cla
   <p>Runs the Solver on the user query. It applies the chat template, runs a full forward pass to get the first logit, then calls <code>_generate_ids</code> to generate the response. The returned object is the KV cache at the end of generation — a compact representation of everything the Solver produced.</p>
 
   <h4><code>_critic_kv(solver_cache)</code></h4>
-  <p>This is the key communication step. The Critic has its own system prompt, but its user context is not a decoded text string — it is the <em>Solver's KV cache</em>, concatenated onto the Critic's own KV states layer by layer:</p>
+  <p>This is where KV cache communication happens. The Critic runs its own system prompt through the model to get an initial KV state. That KV state is then <strong>concatenated onto <code>solver_cache</code></strong> layer by layer along <code>dim=2</code> (the sequence dimension):</p>
 
   <div class="code-block">
     <div class="code-block-header"><span class="lang">python</span><span class="filename">the KV concatenation</span></div>
@@ -727,7 +740,7 @@ result <span class="op">=</span> primitive.<span class="fn">run</span>(<span cla
 ]</code></pre>
   </div>
 
-  <p>Concatenating along <code>dim=2</code> (the sequence dimension) means the Critic attends over both the Solver's full generation context and its own prompt context simultaneously, as if they were one contiguous sequence. The Critic then generates its feedback into its own KV cache, which is what <code>_critic_kv</code> returns.</p>
+  <p>By concatenating along <code>dim=2</code>, the model now attends over both the Solver's full generation history and the Critic's own prompt in one continuous sequence — the Critic effectively "reads" everything the Solver produced without any text being decoded. The Critic then generates its feedback on top of this merged cache, and the resulting <code>critic_cache</code> captures both the Solver's context and the Critic's feedback.</p>
 
   <div class="callout warn">
     <strong>Same model required</strong>
@@ -735,7 +748,7 @@ result <span class="op">=</span> primitive.<span class="fn">run</span>(<span cla
   </div>
 
   <h4><code>_solver_refine_text(solver_cache, critic_cache)</code></h4>
-  <p>The final stage. The Solver re-reads both its own original KV cache and the Critic's KV cache, along with a short refinement prompt, all merged together:</p>
+  <p>The final stage concatenates <strong>three</strong> KV caches together: the original <code>solver_cache</code>, the <code>critic_cache</code> (which already encodes both the Solver's output and the Critic's feedback), and the refine prompt's own KV cache. All three are merged layer by layer:</p>
 
   <div class="code-block">
     <div class="code-block-header"><span class="lang">python</span><span class="filename">three-way KV merge</span></div>
@@ -745,16 +758,16 @@ result <span class="op">=</span> primitive.<span class="fn">run</span>(<span cla
 ]</code></pre>
   </div>
 
-  <p>The Solver generates the final refined output from this merged context. This output is decoded to text and returned as the primitive's result.</p>
+  <p>The model generates the refined answer conditioned on this full merged context: its own original response, the Critic's feedback, and the instruction to refine. This is the only stage that decodes text — the returned string is the primitive's final output.</p>
 
   <h4><code>run(user_query)</code></h4>
-  <p>The public interface. It orchestrates the three stages in sequence:</p>
+  <p>The public entry point. It calls the three stages in sequence, passing the KV cache from each stage into the next:</p>
   <div class="code-block">
     <div class="code-block-header"><span class="lang">python</span></div>
     <pre><code><span class="kw">def</span> <span class="fn">run</span>(self, user_query: str) <span class="op">-&gt;</span> str:
-    solver_cache  <span class="op">=</span> self.<span class="fn">_solver_initial_kv</span>(user_query)   <span class="cmt"># Stage 1: solve</span>
-    critic_cache  <span class="op">=</span> self.<span class="fn">_critic_kv</span>(solver_cache)          <span class="cmt"># Stage 2: critique</span>
-    <span class="kw">return</span> self.<span class="fn">_solver_refine_text</span>(solver_cache, critic_cache) <span class="cmt"># Stage 3: refine</span></code></pre>
+    solver_cache  <span class="op">=</span> self.<span class="fn">_solver_initial_kv</span>(user_query)       <span class="cmt"># Stage 1: generate, keep KV cache</span>
+    critic_cache  <span class="op">=</span> self.<span class="fn">_critic_kv</span>(solver_cache)              <span class="cmt"># Stage 2: concat solver KV, critique</span>
+    <span class="kw">return</span> self.<span class="fn">_solver_refine_text</span>(solver_cache, critic_cache) <span class="cmt"># Stage 3: concat all KV, refine → text</span></code></pre>
   </div>
 
   <!-- SECTION 7 -->
